@@ -225,6 +225,22 @@ describe Rack::ReverseProxy do
         end
       end
     end
+
+    describe "with body_mod funct" do
+      def app
+        Rack::ReverseProxy.new(dummy_app) do
+          mod = Proc.new do 'new body' end
+          reverse_proxy '/test', 'http://example.com/', :body_mod => mod
+        end
+      end
+
+      it 'should call and return the body_mod var' do
+        stub_request(:get, 'http://example.com/test/stuff').to_return({:body => 'Proxied App'})
+        get '/test/stuff'
+        last_response.body.should == 'new body'
+      end
+
+    end
   end
 
   describe "as a rack app" do

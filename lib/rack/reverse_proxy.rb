@@ -68,6 +68,10 @@ module Rack
           end
         end
 
+        unless @body_mod.nil?
+          body = @body_mod.call(body)
+        end
+
         [res.code, create_response_headers(res), [body]]
       }
     end
@@ -106,6 +110,7 @@ module Rack
 
     def reverse_proxy matcher, url, opts={}
       raise GenericProxyURI.new(url) if matcher.is_a?(String) && url.is_a?(String) && URI(url).class == URI::Generic
+      @body_mod = opts.delete :body_mod
       @matchers << ReverseProxyMatcher.new(matcher,url,opts)
     end
   end
