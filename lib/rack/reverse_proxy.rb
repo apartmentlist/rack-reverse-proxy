@@ -69,7 +69,7 @@ module Rack
         end
 
         unless @body_mod.nil?
-          body = @body_mod.call(body)
+          body = @body_mod.call(body, env)
         end
 
         [res.code, create_response_headers(res), [body]]
