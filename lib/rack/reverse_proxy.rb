@@ -79,7 +79,7 @@ module Rack
 
     private
 
-    def get_matcher path, env
+    def get_matcher(path, env)
       matches = @matchers.select do |matcher|
         matcher.match?(path, env)
       end
@@ -109,7 +109,7 @@ module Rack
       @global_options=options
     end
 
-    def reverse_proxy matcher, url, opts={}
+    def reverse_proxy(matcher, url, opts={})
       raise GenericProxyURI.new(url) if matcher.is_a?(String) && url.is_a?(String) && URI(url).class == URI::Generic
       @matchers << ReverseProxyMatcher.new(matcher,url,opts)
     end
@@ -157,7 +157,11 @@ module Rack
     attr_reader :matching,:matching_regexp,:url,:options, :if_op
 
     def match?(path, env)
-      (match_path(path) && (if_op.nil? ? true : if_op.call(env))) ? true : false
+      if match_path(path)
+        if_op.nil? ? true : if_op.call(env)
+      else
+        false
+      end
     end
 
     def get_uri(path,env)
