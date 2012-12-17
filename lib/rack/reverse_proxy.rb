@@ -12,7 +12,7 @@ module Rack
 
     def call(env)
       rackreq = Rack::Request.new(env)
-      matcher = get_matcher rackreq.fullpath
+      matcher = get_matcher rackreq.fullpath, env
       return @app.call(env) if matcher.nil?
 
       uri = matcher.get_uri(rackreq.fullpath,env)
@@ -68,8 +68,9 @@ module Rack
           end
         end
 
-        unless @body_mod.nil?
-          body = @body_mod.call(body, env)
+        body_mod = matcher.options[:body_mod]
+        unless body_mod.nil?
+          body = body_mod.call(body, env)
         end
 
         [res.code, create_response_headers(res), [body]]
@@ -78,9 +79,9 @@ module Rack
 
     private
 
-    def get_matcher path
+    def get_matcher path, env
       matches = @matchers.select do |matcher|
-        matcher.match?(path)
+        matcher.match?(path, env)
       end
 
       if matches.length < 1
@@ -110,7 +111,6 @@ module Rack
 
     def reverse_proxy matcher, url, opts={}
       raise GenericProxyURI.new(url) if matcher.is_a?(String) && url.is_a?(String) && URI(url).class == URI::Generic
-      @body_mod = opts.delete :body_mod
       @matchers << ReverseProxyMatcher.new(matcher,url,opts)
     end
   end
@@ -148,15 +148,16 @@ module Rack
   class ReverseProxyMatcher
     def initialize(matching,url,options)
       @matching=matching
+      @if_op = options.delete :if
       @url=url
       @options=options
       @matching_regexp= matching.kind_of?(Regexp) ? matching : /^#{matching.to_s}/
     end
 
-    attr_reader :matching,:matching_regexp,:url,:options
+    attr_reader :matching,:matching_regexp,:url,:options, :if_op
 
-    def match?(path)
-      match_path(path) ? true : false
+    def match?(path, env)
+      (match_path(path) && (if_op.nil? ? true : if_op.call(env))) ? true : false
     end
 
     def get_uri(path,env)

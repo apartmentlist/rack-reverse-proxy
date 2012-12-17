@@ -99,6 +99,28 @@ describe Rack::ReverseProxy do
       end
     end
 
+    describe "with conditional statement" do
+      def app
+        Rack::ReverseProxy.new(dummy_app) do
+          reverse_proxy '/proxy', 'http://example.com/', :if => Proc.new{|env| true}
+          reverse_proxy '/no_proxy', 'http://example.com/', :if => Proc.new{|env| false}
+        end
+      end
+
+      it "should forward requests to the calling app when the conditional is matched" do
+        get '/no_proxy'
+        last_response.body.should == "Dummy App"
+        last_response.should be_ok
+      end
+
+      it "should proxy requests when a the conditional is matched" do
+        stub_request(:get, 'http://example.com/proxy').to_return({:body => "Proxied App"})
+        get '/proxy'
+        last_response.body.should == "Proxied App"
+      end
+
+    end
+
     describe "with basic auth turned on" do
       def app
         Rack::ReverseProxy.new(dummy_app) do
