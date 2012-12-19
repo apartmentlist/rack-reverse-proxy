@@ -68,12 +68,13 @@ module Rack
           end
         end
 
-        body_mod = matcher.options[:body_mod]
-        unless body_mod.nil?
-          body = body_mod.call(body, env)
+        mod_responce = matcher.options[:mod_responce]
+        responce = [res.code, create_response_headers(res), [body]]
+        unless mod_responce.nil?
+          mod_responce.call(responce, env)
+        else
+          responce
         end
-
-        [res.code, create_response_headers(res), [body]]
       }
     end
 
