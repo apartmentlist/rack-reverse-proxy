@@ -68,10 +68,10 @@ module Rack
           end
         end
 
-        mod_responce = matcher.options[:mod_responce]
+        mod_response = matcher.options[:mod_response]
         responce = [res.code, create_response_headers(res), [body]]
-        unless mod_responce.nil?
-          mod_responce.call(responce, env)
+        unless mod_response.nil?
+          mod_response.call(responce, env)
         else
           responce
         end
