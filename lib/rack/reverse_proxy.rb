@@ -95,7 +95,10 @@ module Rack
     end
 
     def create_response_headers http_response
-      headers = Hash[http_response.to_hash.collect{ |k,v| [k,v.first]}]
+      headers = Hash[http_response.to_hash.collect do |k,v|
+        [k, v.is_a?(Array) ? v.join("\n") : v]
+      end]
+
       response_headers = Rack::Utils::HeaderHash.new(headers)
       # handled by Rack
       response_headers.delete('status')
