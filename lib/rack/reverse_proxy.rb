@@ -19,7 +19,7 @@ module Rack
       all_opts = @global_options.dup.merge(matcher.options)
       headers = Rack::Utils::HeaderHash.new
       env.each { |key, value|
-        if key =~ /HTTP_(.*)/ and not value.nil? and not value.empty?
+        if key =~ /HTTP_(.*)/ && !value.nil? && !value.empty?
           headers[$1] = value
         end
       }
@@ -37,7 +37,6 @@ module Rack
         session.verify_mode = OpenSSL::SSL::VERIFY_NONE
       end
       session.start { |http|
-        puts "Reverse Request Headers: #{headers.inspect}"
         m = rackreq.request_method
         case m
         when "GET", "HEAD", "DELETE", "OPTIONS", "TRACE"
@@ -68,13 +67,7 @@ module Rack
           end
         end
 
-        mod_response = matcher.options[:mod_response]
-        responce = [res.code, create_response_headers(res), [body]]
-        unless mod_response.nil?
-          mod_response.call(responce, env)
-        else
-          responce
-        end
+        [res.code, create_response_headers(res), [body]]
       }
     end
 
