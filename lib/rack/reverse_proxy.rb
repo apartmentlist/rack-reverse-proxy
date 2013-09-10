@@ -6,7 +6,11 @@ module Rack
     def initialize(app = nil, &b)
       @app = app || lambda {|env| [404, [], []] }
       @matchers = []
-      @global_options = {:preserve_host => true, :x_forwarded_host => true, :matching => :all, :verify_ssl => true}
+      @global_options = {:preserve_host => true,
+                         :x_forwarded_host => true,
+                         :matching => :all,
+                         :verify_ssl => true}
+
       instance_eval &b if block_given?
     end
 
@@ -15,49 +19,42 @@ module Rack
       matcher = get_matcher rackreq.fullpath, env
       return @app.call(env) if matcher.nil?
 
-      uri = matcher.get_uri(rackreq.fullpath,env)
+      reverse_proxy_matched_uri(env, matcher, rackreq)
+    end
+
+    def reverse_proxy_matched_uri(env, matcher, rackreq)
+      uri = matcher.get_uri(rackreq.fullpath, env)
       all_opts = @global_options.dup.merge(matcher.options)
-      headers = Rack::Utils::HeaderHash.new
-      env.each { |key, value|
-        if key =~ /HTTP_(.*)/ && !value.nil? && !value.empty?
-          headers[$1] = value
-        end
-      }
-      headers['HOST'] = uri.host if all_opts[:preserve_host]
-      headers['X-Forwarded-Host'] = rackreq.host if all_opts[:x_forwarded_host]
 
-      session = Net::HTTP.new(uri.host, uri.port)
-      session.read_timeout=all_opts[:timeout] if all_opts[:timeout]
+      headers = generate_reverse_proxy_response_headers(env, uri, rackreq, all_opts)
+      session = create_http_session(uri, all_opts)
 
-      session.use_ssl = (uri.scheme == 'https')
-      if uri.scheme == 'https' && all_opts[:verify_ssl]
-        session.verify_mode = OpenSSL::SSL::VERIFY_PEER
-      else
-        # DO NOT DO THIS IN PRODUCTION !!!
-        session.verify_mode = OpenSSL::SSL::VERIFY_NONE
-      end
-      session.start { |http|
+      send_reverse_proxy_request(env, uri, session, rackreq, headers, all_opts)
+    end
+
+    def send_reverse_proxy_request(env, uri, session, rackreq, headers, all_opts)
+      session.start do |http|
         m = rackreq.request_method
         case m
-        when "GET", "HEAD", "DELETE", "OPTIONS", "TRACE"
-          req = Net::HTTP.const_get(m.capitalize).new(uri.request_uri, headers)
-          req.basic_auth all_opts[:username], all_opts[:password] if all_opts[:username] and all_opts[:password]
-        when "PUT", "POST"
-          req = Net::HTTP.const_get(m.capitalize).new(uri.request_uri, headers)
-          req.basic_auth all_opts[:username], all_opts[:password] if all_opts[:username] and all_opts[:password]
+          when "GET", "HEAD", "DELETE", "OPTIONS", "TRACE"
+            req = Net::HTTP.const_get(m.capitalize).new(uri.request_uri, headers)
+            req.basic_auth all_opts[:username], all_opts[:password] if all_opts[:username] and all_opts[:password]
+          when "PUT", "POST"
+            req = Net::HTTP.const_get(m.capitalize).new(uri.request_uri, headers)
+            req.basic_auth all_opts[:username], all_opts[:password] if all_opts[:username] and all_opts[:password]
 
-          if rackreq.body.respond_to?(:read) && rackreq.body.respond_to?(:rewind)
-            body = rackreq.body.read
-            req.content_length = body.size
-            rackreq.body.rewind
+            if rackreq.body.respond_to?(:read) && rackreq.body.respond_to?(:rewind)
+              body = rackreq.body.read
+              req.content_length = body.size
+              rackreq.body.rewind
+            else
+              req.content_length = rackreq.body.size
+            end
+
+            req.content_type = rackreq.content_type unless rackreq.content_type.nil?
+            req.body_stream = rackreq.body
           else
-            req.content_length = rackreq.body.size
-          end
-
-          req.content_type = rackreq.content_type unless rackreq.content_type.nil?
-          req.body_stream = rackreq.body
-        else
-          raise "method not supported: #{m}"
+            raise "method not supported: #{m}"
         end
 
         body = ''
@@ -67,8 +64,37 @@ module Rack
           end
         end
 
-        [res.code, create_response_headers(res), [body]]
+        [res.code, create_response_headers(res), [body] ]
+      end
+    end
+
+    def create_http_session(uri, all_opts)
+      session = Net::HTTP.new(uri.host, uri.port)
+      session.open_timeout = all_opts[:open_timeout] if all_opts[:open_timeout]
+      session.read_timeout = all_opts[:timeout] if all_opts[:timeout]
+
+      session.use_ssl = (uri.scheme == 'https')
+      if uri.scheme == 'https' && all_opts[:verify_ssl]
+        session.verify_mode = OpenSSL::SSL::VERIFY_PEER
+      else
+        # DO NOT DO THIS IN PRODUCTION !!!
+        session.verify_mode = OpenSSL::SSL::VERIFY_NONE
+      end
+
+      session
+    end
+
+    def generate_reverse_proxy_response_headers(env, uri, rackreq, all_opts)
+      headers = Rack::Utils::HeaderHash.new
+      env.each { |key, value|
+        if key =~ /HTTP_(.*)/ && !value.nil? && !value.empty?
+          headers[$1] = value
+        end
       }
+      headers['HOST'] = uri.host if all_opts[:preserve_host]
+      headers['X-Forwarded-Host'] = rackreq.host if all_opts[:x_forwarded_host]
+
+      headers
     end
 
     private
