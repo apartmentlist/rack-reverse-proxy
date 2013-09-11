@@ -22,17 +22,23 @@ module Rack
       reverse_proxy_matched_uri(env, matcher, rackreq)
     end
 
+    private
+
     def reverse_proxy_matched_uri(env, matcher, rackreq)
       uri = matcher.get_uri(rackreq.fullpath, env)
       all_opts = @global_options.dup.merge(matcher.options)
 
-      headers = generate_reverse_proxy_response_headers(env, uri, rackreq, all_opts)
+      headers = create_reverse_proxy_request_headers(env, uri, rackreq, all_opts)
       session = create_http_session(uri, all_opts)
 
-      send_reverse_proxy_request(env, uri, session, rackreq, headers, all_opts)
+      if should_cache_path?(rackreq.path, all_opts)
+        cached_reverse_proxy_request(env, uri, rackreq, session, headers, all_opts)
+      else
+        reverse_proxy_request(env, uri, rackreq, session, headers, all_opts)
+      end
     end
 
-    def send_reverse_proxy_request(env, uri, session, rackreq, headers, all_opts)
+    def reverse_proxy_request(env, uri, rackreq, session, headers, all_opts)
       session.start do |http|
         m = rackreq.request_method
         case m
@@ -68,6 +74,23 @@ module Rack
       end
     end
 
+    def cached_reverse_proxy_request(env, uri, rackreq, session, headers, all_opts)
+      cache_obj = all_opts[:cache]
+      namespace = all_opts.fetch(:cache_namespace, nil)
+      key = namespace.nil? ? rackreq.path : "#{ namespace }/#{rackreq.path}"
+
+      # This only supports Rails.cache
+      # or other caching interfaces that support .fetch(key) do &block
+      response_code, response_headers, bodies = cache_obj.fetch(key) do
+        reverse_proxy_request(env, uri, rackreq, session, headers, all_opts)
+      end
+
+      # Update date header to current time in UTC for cached responses.
+      response_headers['date'] = DateTime.now.new_offset(0).inspect
+      response_headers['x-reverse-proxy-cache-key'] = key
+      [response_code, response_headers, bodies]
+    end
+
     def create_http_session(uri, all_opts)
       session = Net::HTTP.new(uri.host, uri.port)
       session.open_timeout = all_opts[:open_timeout] if all_opts[:open_timeout]
@@ -84,7 +107,7 @@ module Rack
       session
     end
 
-    def generate_reverse_proxy_response_headers(env, uri, rackreq, all_opts)
+    def create_reverse_proxy_request_headers(env, uri, rackreq, all_opts)
       headers = Rack::Utils::HeaderHash.new
       env.each { |key, value|
         if key =~ /HTTP_(.*)/ && !value.nil? && !value.empty?
@@ -97,7 +120,15 @@ module Rack
       headers
     end
 
-    private
+    def should_cache_path?(path, opts)
+      cache_obj = opts.fetch(:cache, nil)
+      return false if cache_obj.nil?
+
+      cache_exemptions = opts.fetch(:cache_exemptions, nil)
+      return true if cache_exemptions.nil?
+
+      return !cache_exemptions.any? { |cache_exempt| path.include?(cache_exempt) }
+    end
 
     def get_matcher(path, env)
       matches = @matchers.select do |matcher|
@@ -113,7 +144,7 @@ module Rack
       end
     end
 
-    def create_response_headers http_response
+    def create_response_headers(http_response)
       headers = Hash[http_response.to_hash.collect do |k,v|
         [k, Array(v).join("\n")]
       end]
@@ -199,11 +230,12 @@ module Rack
     def to_s
       %Q("#{matching.to_s}" => "#{url}")
     end
+
     private
+
     def match_path(path)
       path.match(matching_regexp)
     end
-
-
   end
+
 end
